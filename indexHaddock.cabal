@@ -10,15 +10,19 @@ common warnings
     ghc-options:
                 -Wall
                 -fno-warn-type-defaults
+                -ddump-minimal-imports
 executable indexHaddock
     import:           warnings
     main-is:          indexHaddock.lhs
     build-depends:    base
+                    , containers
                     , text
                     , shelly
+                    , split
     hs-source-dirs:   .
 
     default-language: Haskell2010
   default-extensions:
     OverloadedStrings
     ExtendedDefaultRules
+    NoImplicitPrelude
