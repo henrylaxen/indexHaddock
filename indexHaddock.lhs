@@ -9,16 +9,23 @@ directory, symlink to this directory and name the symlink haddock.
 Then run this script with cabal run, creating an index.html file in
 this directory with the appropriate links.
 
-> import Data.Function ( on )
-> import Data.List ( sortBy, groupBy, isSuffixOf, partition, sortOn )
-> import Data.List.Split ( splitOn )
-> import Prelude (
->   map, ($), Eq((==), (/=)), Monad(return), Ord(compare),
->   Foldable(null, elem), Monoid(mconcat), Bool, String, Char,
->   Ordering, IO, FilePath, unlines, dropWhile, (.), flip, error,
->   (!!), drop, reverse, putStrLn, writeFile )
-> import Shelly ( shelly, silently, findWhen, liftIO, Sh )
+import Data.Function ( on )
+import Data.List ( sortBy, groupBy, isSuffixOf, partition, sortOn )
+import Data.List.Split ( splitOn )
+import Prelude (
+  map, ($), Eq((==), (/=)), Monad(return), Ord(compare),
+  Foldable(null, elem), Monoid(mconcat), Bool, String, Char,
+  Ordering, IO, FilePath, unlines, dropWhile, (.), flip, error,
+  (!!), drop, reverse, putStrLn, writeFile )
+import Shelly ( shelly, silently, findWhen, liftIO, Sh )
 
+> import Data.Function
+> import Data.List 
+> import Data.List.Split 
+> import Prelude
+> import Shelly
+> import qualified Data.Text as T
+> import Control.Monad
 
 This is the name of the directory that should be symlinked to
 ghc-x.y.z directory explained above
@@ -152,3 +159,61 @@ The result is written to the index.html file in this directory
 > e = largestUniqueTriples d
 > f = putStrLn $ go c
 > -}
+
+Before we start, let's make sure this has a chance of working.  We need a home directory which we should find in
+the environment.  If it isns't there, complain.  Next we look for potential haddock directories, which in my
+system reside in ~/.cabal and ~/.ghcup.  If yours are somewhere else, change the value of whereHaddocksLive
+below.  After that, we get the current ghc version, and see if such a subdirectory exists under the
+potential haddock directories.
+
+> whereHaddocksLive :: [String]
+> whereHaddocksLive = [".cabal", ".ghcup", ".stack"]
+
+> runSanityChecks :: IO (Either String [FilePath])
+> runSanityChecks = shelly $ do
+>   mbHome <- get_env "HOME"
+>   case mbHome of
+>     Nothing -> return (Left "There is no Home Directory in your environment")
+>     Just h  -> do
+>       let dirs = addHaddockDirs h
+>       exists <- mconcat <$> mapM (findDirFilter test_e) dirs
+>       inspect exists
+>       let
+>         problem1 = null exists
+>         noDirs1  = "There aren't any potential haddock directories"
+>       if problem1 then return (Left noDirs1) else do
+>         ghcVersionFromGhc <- run "ghc" ["--version"]
+>         inspect ghcVersionFromGhc
+>         let
+>           ghcVersion = T.unpack . last . T.words $ ghcVersionFromGhc
+>           ghcDirs    = filter (hasGhcVersion ghcVersion) exists
+>           problem2 = null ghcDirs
+>           noDirs2 = "There aren't any subdirectories matching ghc version " <> ghcVersion
+>         inspect ghcDirs
+>         if problem2 then return (Left noDirs2) else do
+>           indexHtmls <- mconcat <$> mapM (findWhen isIndex) ghcDirs
+>           let
+>             problem3 = null indexHtmls
+>             noDirs3 = ("There aren't any index.html files in any of the directories I searched:\n" <>
+>                       show ghcDirs)
+>           return $ if problem3 then Left noDirs3 else Right indexHtmls
+>   where
+>     hasGhcVersion x y = mconcat ["/ghc-", x, "/" ] `isInfixOf` y
+>     isIndex = return . isSuffixOf "index.html"
+>     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
+
+> r1 :: IO (Either String [FilePath])
+> r1 = shelly $ do
+>   mbHome <- get_env "HOME"
+>   case mbHome of
+>     Nothing -> return (Left "There is no Home Directory in your environment")
+>     Just h  -> do
+>       let dirs = addHaddockDirs h
+>       exists <- mconcat <$> mapM (findDirFilter test_e) dirs
+>       inspect exists
+>       return (Right [])
+>   where
+>     hasGhcVersion x y = mconcat ["/ghc-", x, "/" ] `isInfixOf` y
+>     isIndex :: String -> Sh Bool
+>     isIndex = return . isSuffixOf "index.html"
+>     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
