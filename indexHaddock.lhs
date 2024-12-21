@@ -176,30 +176,34 @@ potential haddock directories.
 >     Nothing -> return (Left "There is no Home Directory in your environment")
 >     Just h  -> do
 >       let dirs = addHaddockDirs h
->       exists <- mconcat <$> mapM (findDirFilter test_e) dirs
+>       exists <- mapM test_d dirs
 >       inspect exists
 >       let
 >         problem1 = null exists
->         noDirs1  = "There aren't any potential haddock directories"
+>         noDirs1  = unwords ["None of the directories", unwords whereHaddocksLive, "exist"]
 >       if problem1 then return (Left noDirs1) else do
->         ghcVersionFromGhc <- run "ghc" ["--version"]
->         inspect ghcVersionFromGhc
->         let
->           ghcVersion = T.unpack . last . T.words $ ghcVersionFromGhc
->           ghcDirs    = filter (hasGhcVersion ghcVersion) exists
->           problem2 = null ghcDirs
->           noDirs2 = "There aren't any subdirectories matching ghc version " <> ghcVersion
->         inspect ghcDirs
->         if problem2 then return (Left noDirs2) else do
->           indexHtmls <- mconcat <$> mapM (findWhen isIndex) ghcDirs
->           let
->             problem3 = null indexHtmls
->             noDirs3 = ("There aren't any index.html files in any of the directories I searched:\n" <>
->                       show ghcDirs)
->           return $ if problem3 then Left noDirs3 else Right indexHtmls
+> --        inspect aaa
+>         return (Right [])
+
+-- >         ghcVersionFromGhc <- run "ghc" ["--version"]
+-- >         -- inspect ghcVersionFromGhc
+-- >         let
+-- >           ghcVersion = T.unpack . last . T.words $ ghcVersionFromGhc
+-- >           ghcDirs    = filter (hasGhcVersion ghcVersion) exists
+-- >           problem2 = null ghcDirs
+-- >           noDirs2 = "There aren't any subdirectories matching ghc version " <> ghcVersion
+-- >         inspect ("ghcDirs " <> (show . length $ ghcDirs))
+-- >         if problem2 then return (Left noDirs2) else do
+-- >           indexHtmls <- mconcat <$> mapM (findWhen isIndex) ghcDirs
+-- >           let
+-- >             problem3 = null indexHtmls
+-- >             noDirs3 = ("There aren't any index.html files in any of the directories I searched:\n" <>
+-- >                       show (take 2 ghcDirs))
+-- >           return $ if problem3 then Left noDirs3 else Right (take 2 indexHtmls)
+
 >   where
->     hasGhcVersion x y = mconcat ["/ghc-", x, "/" ] `isInfixOf` y
->     isIndex = return . isSuffixOf "index.html"
+>     hasGhcVersion x y = mconcat ["/ghc-", x] `isInfixOf` y
+> --     isIndex = return . isSuffixOf "index.html"
 >     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
 
 > r1 :: IO (Either String [FilePath])
@@ -210,10 +214,11 @@ potential haddock directories.
 >     Just h  -> do
 >       let dirs = addHaddockDirs h
 >       exists <- mconcat <$> mapM (findDirFilter test_e) dirs
->       inspect exists
+>       -- inspect exists
 >       return (Right [])
 >   where
->     hasGhcVersion x y = mconcat ["/ghc-", x, "/" ] `isInfixOf` y
+>     hasGhcVersion x y = mconcat ["/ghc-", x ] `isInfixOf` y
 >     isIndex :: String -> Sh Bool
 >     isIndex = return . isSuffixOf "index.html"
 >     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
+
