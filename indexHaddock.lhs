@@ -25,7 +25,6 @@ import Shelly ( shelly, silently, findWhen, liftIO, Sh )
 > import Prelude
 > import Shelly
 > import qualified Data.Text as T
-> import Control.Monad
 
 This is the name of the directory that should be symlinked to
 ghc-x.y.z directory explained above
@@ -124,14 +123,22 @@ The result is written to the index.html file in this directory
 
 > main :: IO ()
 > main = shelly $ silently $ do
->   fileList    <- findWhen hasIndex dir
->   if null fileList
->   then liftIO $ putStrLn  "No index files were found"
->   else liftIO $ writeFile "index.html" $ go (fileList)
+>   haveHaddock <-  test_d dir
+>   if haveHaddock then do
+>     fileList    <- findWhen hasIndex dir
+>     if null fileList
+>     then liftIO $ putStrLn  "No index files were found"
+>     else liftIO $ runList fileList
+>   else do
+>       eFileList <- runSanityChecks
+>       liftIO $ either putStrLn runList eFileList
+>   where
+>     runList files = do
+>       putStrLn $ "Found " <> (show . length $ files) <> " files."
+>       writeFile "index.html" . toHtml $ files 
 
-
-> go :: [String] -> String
-> go files = result
+> toHtml :: [String] -> String
+> toHtml files = result
 >   where
 >     triples :: [(String,String,String)]
 >     triples = map getNameAndVersion files
@@ -143,23 +150,6 @@ The result is written to the index.html file in this directory
 >     links = map addLink filteredPairs
 >     result = mconcat [headString,unlines links,"</body>"]
 
-> {-
-> a1,a2,a3,b1,b2,b3 :: String
-> a1 = "haddock/parallel-3.2.2.0-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> a2 = "haddock/parallel-3.2.2.2-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> a3 = "haddock/parallel-3.2.2.1-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> b1 = "haddock/shelly-3.2.2.0-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> b2 = "haddock/shelly-3.2.2.2-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> b3 = "haddock/shelly-3.2.2.1-a6b3f3f1a27bc0a89445a101e19b2a53e32dd5869767317ce817c68a5fb2626b/share/doc/html/index.html"
-> c :: [String]
-> c = [a1,b1,b2,b3,a2,a3]
-> d :: [(String, String, String)]
-> d = map getNameAndVersion c
-> e :: [(String, String, String)]
-> e = largestUniqueTriples d
-> f = putStrLn $ go c
-> -}
-
 Before we start, let's make sure this has a chance of working.  We need a home directory which we should find in
 the environment.  If it isns't there, complain.  Next we look for potential haddock directories, which in my
 system reside in ~/.cabal and ~/.ghcup.  If yours are somewhere else, change the value of whereHaddocksLive
@@ -169,7 +159,7 @@ potential haddock directories.
 > whereHaddocksLive :: [String]
 > whereHaddocksLive = [".cabal", ".ghcup", ".stack"]
 
-> runSanityChecks :: IO (Either String [FilePath])
+> runSanityChecks :: Sh (Either String [FilePath])
 > runSanityChecks = shelly $ do
 >   mbHome <- get_env "HOME"
 >   case mbHome of
@@ -177,48 +167,25 @@ potential haddock directories.
 >     Just h  -> do
 >       let dirs = addHaddockDirs h
 >       exists <- mapM test_d dirs
->       inspect exists
+>       let existing = map snd . filter fst $ zip exists dirs
+>       inspect existing
 >       let
->         problem1 = null exists
+>         problem1 = null existing
 >         noDirs1  = unwords ["None of the directories", unwords whereHaddocksLive, "exist"]
 >       if problem1 then return (Left noDirs1) else do
-> --        inspect aaa
->         return (Right [])
-
--- >         ghcVersionFromGhc <- run "ghc" ["--version"]
--- >         -- inspect ghcVersionFromGhc
--- >         let
--- >           ghcVersion = T.unpack . last . T.words $ ghcVersionFromGhc
--- >           ghcDirs    = filter (hasGhcVersion ghcVersion) exists
--- >           problem2 = null ghcDirs
--- >           noDirs2 = "There aren't any subdirectories matching ghc version " <> ghcVersion
--- >         inspect ("ghcDirs " <> (show . length $ ghcDirs))
--- >         if problem2 then return (Left noDirs2) else do
--- >           indexHtmls <- mconcat <$> mapM (findWhen isIndex) ghcDirs
--- >           let
--- >             problem3 = null indexHtmls
--- >             noDirs3 = ("There aren't any index.html files in any of the directories I searched:\n" <>
--- >                       show (take 2 ghcDirs))
--- >           return $ if problem3 then Left noDirs3 else Right (take 2 indexHtmls)
-
+>         ghcVersion <- (<>) "ghc-" .T.unpack . last . T.words <$> run "ghc" ["--version"]
+>         inspect ghcVersion
+>         indexes <- mconcat <$> mapM (findWhen (wanted ghcVersion)) existing
+>         let
+>           problem2 = null indexes
+>           noIndexes =  "There aren't any index.html files in any of the directories I searched:\n" <>
+>                        show existing <> " that match ghc version " <> ghcVersion
+>         if problem2 then return( Left noIndexes) else do
+>           return (Right indexes)  
 >   where
->     hasGhcVersion x y = mconcat ["/ghc-", x] `isInfixOf` y
-> --     isIndex = return . isSuffixOf "index.html"
+>     wanted ::  String -> String -> Sh Bool
+>     wanted ghcVersion fName  = return ((ghcVersion `isInfixOf` fName) &&
+>                                      ("index.html" `isSuffixOf` fName))
 >     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
-
-> r1 :: IO (Either String [FilePath])
-> r1 = shelly $ do
->   mbHome <- get_env "HOME"
->   case mbHome of
->     Nothing -> return (Left "There is no Home Directory in your environment")
->     Just h  -> do
->       let dirs = addHaddockDirs h
->       exists <- mconcat <$> mapM (findDirFilter test_e) dirs
->       -- inspect exists
->       return (Right [])
->   where
->     hasGhcVersion x y = mconcat ["/ghc-", x ] `isInfixOf` y
->     isIndex :: String -> Sh Bool
->     isIndex = return . isSuffixOf "index.html"
->     addHaddockDirs h = map ((</>) h)  whereHaddocksLive 
+>
 
